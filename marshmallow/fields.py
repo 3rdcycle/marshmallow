@@ -87,7 +87,7 @@ null = _Null()
 missing = _Missing()
 
 def _call_and_store(getter_func, data, field_name, field_obj, errors_dict,
-               exception_class, strict=False):
+               exception_class, strict=False, index=None):
     """Helper method for DRYing up logic in the :meth:`Marshaller.serialize` and
     :meth:`UnMarshaller.deserialize` methods. Call ``getter_func`` with ``data`` as its
     argument, and store any errors of type ``exception_class`` in ``error_dict``.
@@ -113,15 +113,20 @@ def _call_and_store(getter_func, data, field_name, field_obj, errors_dict,
             err.field_name = field_name
             raise err
         # Warning: Mutation!
+        if index is not None:
+            errors = {}
+            errors_dict[index] = errors
+        else:
+            errors = errors_dict
         if (hasattr(err, 'underlying_exception') and
                 isinstance(err.underlying_exception, ValidationError)):
             validation_error = err.underlying_exception
             if isinstance(validation_error.messages, dict):
-                errors_dict[field_name] = validation_error.messages
+                errors[field_name] = validation_error.messages
             else:
-                errors_dict.setdefault(field_name, []).extend(validation_error.messages)
+                errors.setdefault(field_name, []).extend(validation_error.messages)
         else:
-            errors_dict.setdefault(field_name, []).append(text_type(err))
+            errors.setdefault(field_name, []).append(text_type(err))
         value = None
     except TypeError:
         # field declared as a class, not an instance
@@ -149,7 +154,7 @@ class Marshaller(object):
         self.__pending = False
 
     def serialize(self, obj, fields_dict, many=False, strict=False, skip_missing=False,
-                  accessor=None, dict_class=None):
+                  accessor=None, dict_class=None, index=None):
         """Takes raw data (a dict, list, or other object) and a dict of
         fields to output and serializes the data based on those fields.
 
@@ -174,8 +179,8 @@ class Marshaller(object):
         if many and obj is not None:
             self.__pending = True
             ret = [self.serialize(d, fields_dict, many=False, strict=strict,
-                                    dict_class=dict_class)
-                    for d in obj]
+                                    dict_class=dict_class, index=idx)
+                    for idx, d in enumerate(obj)]
             self.__pending = False
             return ret
         items = []
@@ -189,7 +194,8 @@ class Marshaller(object):
                 field_obj=field_obj,
                 errors_dict=self.errors,
                 exception_class=MarshallingError,
-                strict=strict
+                strict=strict,
+                index=index
             )
             if (value is missing) or (skip_missing and
                                       value in field_obj.SKIPPABLE_VALUES):
@@ -243,7 +249,7 @@ class Unmarshaller(object):
         return output
 
     def deserialize(self, data, fields_dict, many=False, validators=None,
-            preprocess=None, postprocess=None, strict=False, dict_class=None):
+            preprocess=None, postprocess=None, strict=False, dict_class=None, index=None):
         """Deserialize ``data`` based on the schema defined by ``fields_dict``.
 
         :param dict data: The data to deserialize.
@@ -267,8 +273,9 @@ class Unmarshaller(object):
             self.__pending = True
             ret = [self.deserialize(d, fields_dict, many=False,
                         validators=validators, preprocess=preprocess,
-                        postprocess=postprocess, strict=strict, dict_class=dict_class)
-                    for d in data]
+                        postprocess=postprocess, strict=strict, dict_class=dict_class,
+                        index=idx)
+                    for idx, d in enumerate(data)]
             self.__pending = False
             return ret
         if data is not None:
@@ -287,7 +294,8 @@ class Unmarshaller(object):
                     field_obj=field_obj,
                     errors_dict=self.errors,
                     exception_class=UnmarshallingError,
-                    strict=strict
+                    strict=strict,
+                    index=index
                 )
                 if raw_value is not missing:
                     items.append((key, value))
